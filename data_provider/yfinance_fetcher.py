@@ -121,7 +121,15 @@ class YfinanceFetcher(BaseFetcher):
             hk_code = hk_code.zfill(4)  # 补齐到4位
             logger.debug(f"转换港股代码: {stock_code} -> {hk_code}.HK")
             return f"{hk_code}.HK"
+        # 日股：4位数字 -> .T
+        if code.endswith('.T'):
+            logger.debug(f"识别为日股代码(已带后缀): {code}")
+            return code
 
+        if code.isdigit() and len(code) == 4:
+            logger.debug(f"识别为日股代码: {stock_code} -> {code}.T")
+            return f"{code}.T"
+    
         # 已经包含后缀的情况
         if '.SS' in code or '.SZ' in code or '.HK' in code or '.BJ' in code:
             return code
@@ -674,14 +682,22 @@ class YfinanceFetcher(BaseFetcher):
                 index_name=index_name,
             )
 
-        # 仅处理美股股票
-        if not self._is_us_stock(stock_code):
-            logger.debug(f"[Yfinance] {stock_code} 不是美股，跳过")
-            return None
+        # 日股
+    if stock_code.endswith('.T') or (
+    stock_code.isdigit() and len(stock_code) == 4
+):
+    symbol = self._convert_stock_code(stock_code)
+
+# 美股
+elif self._is_us_stock(stock_code):
+    symbol = stock_code.strip().upper()
+
+else:
+    logger.debug(f"[Yfinance] 不支持的股票代码: {stock_code}")
+    return None
 
         try:
-            symbol = stock_code.strip().upper()
-            logger.debug(f"[Yfinance] 获取美股 {symbol} 实时行情")
+                       logger.debug(f"[Yfinance] 获取美股 {symbol} 实时行情")
 
             ticker = yf.Ticker(symbol)
 
@@ -774,7 +790,7 @@ if __name__ == "__main__":
     fetcher = YfinanceFetcher()
 
     try:
-        df = fetcher.get_daily_data('600519')  # 茅台
+        df = fetcher.get_daily_data('4063')  # 信越化学
         print(f"获取成功，共 {len(df)} 条数据")
         print(df.tail())
     except Exception as e:
