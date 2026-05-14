@@ -1,140 +1,129 @@
-{% from '_macros.j2' import market_snapshot with context %}
-# 📈 {{ report_date }} 中长期趋势观察仪表盘
+# 🎯 {{ report_date }} AI产业趋势观察
 
-> 共跟踪 **{{ results|length }}** 只标的 | 🟢强势:{{ buy_count }} 🟡观察:{{ hold_count }} 🔴转弱:{{ sell_count }}
-
-## 📊 今日摘要
-
-{% for e in enriched %}
-{{ e.signal_emoji }} **{{ e.stock_name }}（{{ e.result.code }}）**：{{ localize_trend_prediction(e.result.trend_prediction, report_language) }} | 评分 {{ e.result.sentiment_score }} | 系统信号：{{ e.localized_operation_advice }}
-{% endfor %}
-
-> 注：本报告定位为“中长期趋势与产业观察”，不是短线买卖指令。技术信号用于辅助判断趋势，不单独构成交易依据。
+> 共分析 {{ summary.total }} 只股票 |
+🟢 趋势强化: {{ summary.buy }} |
+🟡 趋势中性: {{ summary.hold }} |
+🔴 趋势转弱: {{ summary.sell }}
 
 ---
-{% if not summary_only %}
-{% for e in enriched %}
-{% set result = e.result %}
-{% set dashboard = result.dashboard if result.dashboard else {} %}
-{% set intel = dashboard.get('intelligence') or {} %}
-{% set core = dashboard.get('core_conclusion') or {} %}
-{% set data_persp = dashboard.get('data_perspective') or {} %}
 
-## {{ e.signal_emoji }} {{ e.stock_name }}（{{ result.code }}）
+# 📊 市场观察摘要
 
-### 📌 趋势结论
+{% for stock in stocks %}
+{% if stock.signal == 'buy' %}🟢{% elif stock.signal == 'sell' %}🔴{% else %}🟡{% endif %}
+{{ stock.name }}（{{ stock.code }}） | 评分 {{ stock.score }} | {{ stock.signal_text }}
 
-**趋势判断**：{{ localize_trend_prediction(result.trend_prediction, report_language) }}  
-**系统信号**：{{ e.signal_text }} / {{ e.localized_operation_advice }}  
-**评分**：{{ result.sentiment_score }}/100
-
-{% if core.get('one_sentence') or result.analysis_summary %}
-> **一句话观察**：{{ core.get('one_sentence', result.analysis_summary) }}
-{% endif %}
-
-{% if core.get('time_sensitivity') %}
-**观察时效**：{{ core.get('time_sensitivity') }}
-{% endif %}
-
-{% if intel %}
-### 🏭 产业与事件观察
-
-{% if intel.get('latest_news') %}
-**最新动态**：{{ intel.latest_news }}
-{% endif %}
-
-{% if intel.get('sentiment_summary') %}
-**市场情绪**：{{ intel.sentiment_summary }}
-{% endif %}
-
-{% if intel.get('earnings_outlook') %}
-**财报/业绩线索**：{{ intel.earnings_outlook }}
-{% endif %}
-
-{% if intel.get('positive_catalysts') %}
-**正向催化**：
-{% for cat in intel.positive_catalysts %}
-- {{ cat }}
 {% endfor %}
-{% endif %}
 
-{% if intel.get('risk_alerts') %}
-**主要风险**：
-{% for alert in intel.risk_alerts %}
-- {{ alert }}
-{% endfor %}
-{% endif %}
-{% endif %}
+---
 
-{{ market_snapshot(result) }}
+{% for stock in stocks %}
 
-{% if data_persp %}
-### 📊 趋势与量价
+# {% if stock.signal == 'buy' %}🟢{% elif stock.signal == 'sell' %}🔴{% else %}🟡{% endif %} {{ stock.name }}（{{ stock.code }}）
 
-{% set trend_data = data_persp.get('trend_status', {}) %}
-{% if trend_data %}
-**均线状态**：{{ trend_data.get('ma_alignment', 'N/A') }}  
-**多头排列**：{{ '是' if trend_data.get('is_bullish') else '否' }}  
-**趋势强度**：{{ trend_data.get('trend_score', 'N/A') }}/100
-{% endif %}
+## 📰 市场状态
 
-{% set price_data = data_persp.get('price_position', {}) %}
-{% if price_data %}
-| 指标 | 数值 |
-|------|------|
-| 当前价 | {{ price_data.get('current_price', 'N/A') }} |
-| MA5 | {{ price_data.get('ma5', 'N/A') }} |
-| MA10 | {{ price_data.get('ma10', 'N/A') }} |
-| MA20 | {{ price_data.get('ma20', 'N/A') }} |
-| MA5偏离 | {{ price_data.get('bias_ma5', 'N/A') }}% |
-| 支撑参考 | {{ price_data.get('support_level', 'N/A') }} |
-| 压力参考 | {{ price_data.get('resistance_level', 'N/A') }} |
-{% endif %}
+### 💭 市场情绪
+{{ stock.sentiment or '市场整体情绪平稳，暂无明显异常波动。' }}
 
-{% set vol_data = data_persp.get('volume_analysis', {}) %}
-{% if vol_data %}
-**成交量观察**：量比 {{ vol_data.get('volume_ratio', 'N/A') }}{% if vol_data.get('volume_status') %}（{{ vol_data.get('volume_status') }}）{% endif %}  
-{% if vol_data.get('volume_meaning') %}
-{{ vol_data.get('volume_meaning') }}
-{% endif %}
-{% endif %}
-{% endif %}
+### 📊 趋势状态
+• 中长期趋势：{{ stock.trend_desc or '趋势维持中性' }}
+• 当前阶段：{{ stock.phase or '正常波动区间' }}
+• 趋势强度：{{ stock.trend_strength or '暂无数据' }}
 
-### 🧭 持仓观察框架
+---
 
-{% set trend_data = data_persp.get('trend_status', {}) if data_persp else {} %}
-{% set price_data = data_persp.get('price_position', {}) if data_persp else {} %}
+## 🏭 产业观察
 
-- **趋势是否仍在**：{% if trend_data.get('is_bullish') %}当前仍处于多头/偏强结构。{% else %}当前未形成明确多头结构，需降低预期。{% endif %}
-- **关键观察位**：MA20 {{ price_data.get('ma20', 'N/A') }}；若连续跌破并无法收复，说明中期趋势可能转弱。
-- **加仓原则**：只在产业逻辑未恶化、趋势未破坏、估值风险可接受时分批考虑；避免因单日上涨追高。
-- **减仓原则**：若财报/指引恶化、行业主线降温，或价格跌破中期趋势支撑，应优先控制仓位。
-- **适用风格**：中长期观察，不适合按单日信号频繁交易。
-
-{% if not dashboard %}
-{% if result.buy_reason %}
-### 💡 系统补充理由
-{{ result.buy_reason }}
-{% endif %}
-{% if result.risk_warning %}
-### ⚠️ 风险提示
-{{ result.risk_warning }}
-{% endif %}
-{% endif %}
-
-{% set hist = history_by_code.get(result.code, []) %}
-{% if hist %}
-### 📜 历史变化
-
-| 时间 | 评分 | 系统信号 | 趋势 |
-|------|------|---------|------|
-{% for h in hist %}
-| {{ h.created_at[:16] if h.created_at else 'N/A' }} | {{ h.sentiment_score or 'N/A' }} | {{ localize_operation_advice(h.operation_advice or 'N/A', report_language) }} | {{ localize_trend_prediction(h.trend_prediction or 'N/A', report_language) }} |
-{% endfor %}
+{% if stock.industry_logic %}
+{{ stock.industry_logic }}
+{% else %}
+• AI产业链趋势仍是当前市场核心主线
+• 半导体、HBM、先进封装需求持续受到市场关注
+• 建议结合行业景气度而非短期波动进行观察
 {% endif %}
 
 ---
+
+## ⚠️ 风险因素
+
+{% if stock.risks %}
+{% for risk in stock.risks %}
+• {{ risk }}
 {% endfor %}
+{% else %}
+• 全球科技股波动风险
+• 半导体周期变化风险
+• 汇率与宏观环境变化风险
 {% endif %}
 
-*生成时间：{{ report_timestamp }}*
+---
+
+## 📢 最新动态
+
+{{ stock.news_summary or '近期暂无重大公开消息，市场主要受行业趋势与技术面驱动。' }}
+
+---
+
+## 📈 当日行情
+
+• 收盘：{{ stock.close }}
+• 昨收：{{ stock.pre_close }}
+• 开盘：{{ stock.open }}
+• 最高：{{ stock.high }}
+• 最低：{{ stock.low }}
+• 涨跌幅：{{ stock.change_percent }}
+• 成交量：{{ stock.volume }}
+
+---
+
+## 📊 趋势指标
+
+• 当前价：{{ stock.current_price }}
+• MA5：{{ stock.ma5 }}
+• MA10：{{ stock.ma10 }}
+• MA20：{{ stock.ma20 }}
+• 支撑位：{{ stock.support }}
+• 压力位：{{ stock.resistance }}
+
+---
+
+## 📌 趋势解读
+
+{% if stock.ma_bull %}
+• 均线系统维持多头排列
+• 中长期趋势尚未破坏
+{% else %}
+• 均线结构趋于震荡
+• 建议继续观察趋势变化
+{% endif %}
+
+{% if stock.volume_desc %}
+• 成交量状态：{{ stock.volume_desc }}
+{% endif %}
+
+---
+
+## 🧭 观察结论
+
+### {% if stock.signal == 'buy' %}🟢 趋势强化{% elif stock.signal == 'sell' %}🔴 趋势转弱{% else %}🟡 趋势中性{% endif %}
+
+> {{ stock.one_sentence or '建议结合行业趋势与财报变化持续观察。' }}
+
+---
+
+## 📅 后续关注重点
+
+• NVIDIA 财报与AI资本开支
+• 台积电先进制程与CoWoS扩产
+• HBM产业链需求变化
+• 日本半导体材料与设备板块景气度
+• 公司后续财报与业绩指引
+
+---
+
+{% endfor %}
+
+# ⏰ 报告生成时间
+
+{{ generated_time }}
