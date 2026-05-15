@@ -1,14 +1,15 @@
 # -*- coding: utf-8 -*-
 """
 ===================================
-A股自选股智能分析系统 - 搜索服务模块
+AI投资研究系统 - 搜索服务模块
 ===================================
 
 职责：
 1. 提供统一的新闻搜索接口
 2. 支持 Bocha、Tavily、Brave、SerpAPI、SearXNG 多种搜索引擎
 3. 多 Key 负载均衡和故障转移
-4. 搜索结果缓存和格式化
+4. 针对日股/美股AI产业链增强搜索关键词
+5. 搜索结果缓存和格式化
 """
 
 import logging
@@ -2091,7 +2092,7 @@ class SearchService:
     2. 自动故障转移
     3. 结果聚合和格式化
     4. 数据源失败时的增强搜索（股价、走势等）
-    5. 港股/美股自动使用英文搜索关键词
+    5. 港股/美股/日股自动使用合适的区域与产业关键词
     """
     
     # 增强搜索关键词模板（A股 中文）
@@ -2111,11 +2112,22 @@ class SearchService:
         "{name} technical analysis",
         "{name} {code} performance volume",
     ]
+
+    # 增强搜索关键词模板（日股 / AI产业链）
+    # 目标：让搜索结果更偏向产业、财报、AI半导体链，而不是短线股价噪音
+    ENHANCED_SEARCH_KEYWORDS_JP = [
+        "{name} {code} 決算 業績 見通し 半導体",
+        "{name} {code} AI 半導体 HBM CoWoS NVIDIA TSMC",
+        "{name} {code} 株価 材料 決算説明資料",
+        "{name} {code} semiconductor earnings outlook",
+        "{name} {code} AI supply chain HBM CoWoS TSMC NVIDIA",
+    ]
     NEWS_OVERSAMPLE_FACTOR = 2
     NEWS_OVERSAMPLE_MAX = 10
     FUTURE_TOLERANCE_DAYS = 1
     _CHINESE_TEXT_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]")
     _US_STOCK_RE = re.compile(r"^[A-Za-z]{1,5}(\.[A-Za-z])?$")
+    _JP_STOCK_RE = re.compile(r"^(?:\d{4}|\d{4}\.T)$", re.IGNORECASE)
 
     def __init__(
         self,
@@ -2225,18 +2237,36 @@ class SearchService:
     
     @staticmethod
     def _is_foreign_stock(stock_code: str) -> bool:
-        """判断是否为港股或美股"""
-        code = stock_code.strip()
+        """判断是否为非A股：港股、美股或日股。"""
+        code = (stock_code or "").strip()
+        if not code:
+            return False
+        # 日股：4063 / 4063.T
+        if SearchService._is_jp_stock(code):
+            return True
         # 美股：1-5个大写字母，可能包含点（如 BRK.B）
         if SearchService._US_STOCK_RE.match(code):
             return True
         # 港股：带 hk 前缀或 5位纯数字
         lower = code.lower()
-        if lower.startswith('hk'):
+        if lower.startswith('hk') or lower.endswith('.hk'):
             return True
         if code.isdigit() and len(code) == 5:
             return True
         return False
+
+    @classmethod
+    def _is_jp_stock(cls, stock_code: str) -> bool:
+        """判断是否为日股代码。支持 4063 和 4063.T。"""
+        code = (stock_code or "").strip().upper()
+        return bool(cls._JP_STOCK_RE.match(code))
+
+    @classmethod
+    def _is_hk_stock(cls, stock_code: str) -> bool:
+        """判断是否为港股代码。"""
+        code = (stock_code or "").strip()
+        lower = code.lower()
+        return bool(lower.startswith("hk") or lower.endswith(".hk") or (code.isdigit() and len(code) == 5))
 
     @classmethod
     def _contains_chinese_text(cls, value: Optional[str]) -> bool:
@@ -2256,13 +2286,13 @@ class SearchService:
         stock_name: str,
         focus_keywords: Optional[List[str]] = None,
     ) -> bool:
-        """A 股或中文名称/关键词场景下优先中文资讯。
+        """判断是否优先中文资讯。
 
-        Only returns True when there is a positive Chinese signal:
-        Chinese characters in keywords/stock_name, or a 6-digit A-stock code.
-        Avoids false positives for non-foreign but English contexts like
-        ``stock_code="market", stock_name="US market"``.
+        对日股不强制中文。即使股票名称含中文，也优先允许日文/英文搜索，
+        因为日股的关键一手信息常来自日本公司公告、決算資料、日经/Reuters等。
         """
+        if cls._is_jp_stock(stock_code):
+            return False
         if any(cls._contains_chinese_text(keyword) for keyword in (focus_keywords or [])):
             return True
         if cls._contains_chinese_text(stock_name):
@@ -2331,6 +2361,10 @@ class SearchService:
         prefer_chinese: bool,
     ) -> Dict[str, str]:
         """Resolve Brave locale hints without forcing US bias onto non-US symbols."""
+        if cls._is_jp_stock(stock_code):
+            return {"search_lang": "ja", "country": "JP"}
+        if cls._is_hk_stock(stock_code):
+            return {"search_lang": "zh-hans" if prefer_chinese else "en", "country": "HK"}
         if prefer_chinese:
             return {"search_lang": "zh-hans", "country": "CN"}
         if cls._is_us_stock(stock_code):
@@ -2339,7 +2373,7 @@ class SearchService:
 
     # A-share ETF code prefixes (Shanghai 51/52/56/58, Shenzhen 15/16/18)
     _A_ETF_PREFIXES = ('51', '52', '56', '58', '15', '16', '18')
-    _ETF_NAME_KEYWORDS = ('ETF', 'FUND', 'TRUST', 'INDEX', 'TRACKER', 'UNIT')  # US/HK ETF name hints
+    _ETF_NAME_KEYWORDS = ('ETF', 'FUND', 'TRUST', 'INDEX', 'TRACKER', 'UNIT', '投信', '上場投信')  # US/HK/JP ETF name hints
 
     @staticmethod
     def is_index_or_etf(stock_code: str, stock_name: str) -> bool:
@@ -2743,14 +2777,21 @@ class SearchService:
 
         # 构建搜索查询（优化搜索效果）
         is_foreign = self._is_foreign_stock(stock_code)
+        is_jp = self._is_jp_stock(stock_code)
         if focus_keywords:
             # 如果提供了关键词，直接使用关键词作为查询
             query = " ".join(focus_keywords)
+        elif is_jp:
+            # 日股：优先搜索日文/英文产业与财报关键词，避免只搜“股价”
+            query = (
+                f"{stock_name} {stock_code} 決算 業績 見通し "
+                "AI 半導体 HBM CoWoS NVIDIA TSMC"
+            )
         elif prefer_chinese:
             query = f"{stock_name} {stock_code} 股票 最新消息"
         elif is_foreign:
             # 港股/美股使用英文搜索关键词
-            query = f"{stock_name} {stock_code} stock latest news"
+            query = f"{stock_name} {stock_code} stock latest news earnings outlook"
         else:
             # 默认主查询：股票名称 + 核心关键词
             query = f"{stock_name} {stock_code} 股票 最新消息"
@@ -2961,27 +3002,62 @@ class SearchService:
     ) -> Dict[str, SearchResponse]:
         """
         多维度情报搜索（同时使用多个引擎、多个维度）
-        
-        搜索维度：
-        1. 最新消息 - 近期新闻动态
-        2. 风险排查 - 减持、处罚、利空
-        3. 业绩预期 - 年报预告、业绩快报
-        
-        Args:
-            stock_code: 股票代码
-            stock_name: 股票名称
-            max_searches: 最大搜索次数
-            
-        Returns:
-            {维度名称: SearchResponse} 字典
+
+        研究型搜索维度：
+        1. 最新消息
+        2. 财报/业绩指引
+        3. 产业链与竞争力
+        4. 风险排查
+        5. AI/半导体主题联动（日股/美股优先）
         """
         results = {}
         search_count = 0
 
         is_foreign = self._is_foreign_stock(stock_code)
+        is_jp = self._is_jp_stock(stock_code)
         is_index_etf = self.is_index_or_etf(stock_code, stock_name)
 
-        if is_foreign:
+        if is_jp:
+            # 日股研究：优先日文关键词 + 全球AI产业链关键词。
+            # 目标是获取決算、会社説明資料、半导体产业链、NVIDIA/TSMC/HBM/CoWoS 关联信息。
+            search_dimensions = [
+                {
+                    'name': 'latest_news',
+                    'query': f"{stock_name} {stock_code} 最新 ニュース 決算 材料",
+                    'desc': '最新消息',
+                    'tavily_topic': 'news',
+                    'strict_freshness': True,
+                },
+                {
+                    'name': 'earnings',
+                    'query': f"{stock_name} {stock_code} 決算 業績 見通し IR 説明資料",
+                    'desc': '财报/业绩指引',
+                    'tavily_topic': None,
+                    'strict_freshness': False,
+                },
+                {
+                    'name': 'industry',
+                    'query': f"{stock_name} {stock_code} 半導体 AI HBM CoWoS NVIDIA TSMC サプライチェーン",
+                    'desc': 'AI/半导体产业链',
+                    'tavily_topic': None,
+                    'strict_freshness': False,
+                },
+                {
+                    'name': 'market_analysis',
+                    'query': f"{stock_name} {stock_code} analyst rating target price earnings outlook semiconductor",
+                    'desc': '机构/市场分析',
+                    'tavily_topic': None,
+                    'strict_freshness': False,
+                },
+                {
+                    'name': 'risk_check',
+                    'query': f"{stock_name} {stock_code} リスク 下方修正 減益 訴訟 不祥事 円高 半導体市況",
+                    'desc': '风险排查',
+                    'tavily_topic': 'news',
+                    'strict_freshness': True,
+                },
+            ]
+        elif is_foreign:
             search_dimensions = [
                 {
                     'name': 'latest_news',
@@ -3001,7 +3077,7 @@ class SearchService:
                     'name': 'risk_check',
                     'query': (
                         f"{stock_name} {stock_code} index performance outlook tracking error"
-                        if is_index_etf else f"{stock_name} risk insider selling lawsuit litigation"
+                        if is_index_etf else f"{stock_name} risk insider selling lawsuit litigation guidance cut"
                     ),
                     'desc': '风险排查',
                     'tavily_topic': None if is_index_etf else 'news',
@@ -3011,7 +3087,7 @@ class SearchService:
                     'name': 'earnings',
                     'query': (
                         f"{stock_name} {stock_code} index performance composition outlook"
-                        if is_index_etf else f"{stock_name} earnings revenue profit growth forecast"
+                        if is_index_etf else f"{stock_name} earnings revenue profit growth forecast guidance"
                     ),
                     'desc': '业绩预期',
                     'tavily_topic': None,
@@ -3021,7 +3097,7 @@ class SearchService:
                     'name': 'industry',
                     'query': (
                         f"{stock_name} {stock_code} index sector allocation holdings"
-                        if is_index_etf else f"{stock_name} industry competitors market share outlook"
+                        if is_index_etf else f"{stock_name} AI semiconductor HBM CoWoS data center competitors market share outlook"
                     ),
                     'desc': '行业分析',
                     'tavily_topic': None,
@@ -3085,7 +3161,7 @@ class SearchService:
                     'strict_freshness': False,
                 },
             ]
-        
+
         search_days = self._effective_news_window_days()
         target_per_dimension = 3
         provider_max_results = self._provider_request_size(target_per_dimension)
@@ -3103,37 +3179,40 @@ class SearchService:
             target_per_dimension,
             provider_max_results,
         )
-        
-        # 轮流使用不同的搜索引擎
+
         provider_index = 0
-        
+
         for dim in search_dimensions:
             if search_count >= max_searches:
                 break
-            
-            # 选择搜索引擎（轮流使用）
+
             available_providers = [p for p in self._providers if p.is_available]
             if not available_providers:
                 break
-            
+
             provider = available_providers[provider_index % len(available_providers)]
             provider_index += 1
-            
+
             logger.info(f"[情报搜索] {dim['desc']}: 使用 {provider.name}")
 
+            search_kwargs: Dict[str, Any] = {}
             if isinstance(provider, TavilySearchProvider) and dim.get('tavily_topic'):
-                response = provider.search(
-                    dim['query'],
-                    max_results=provider_max_results,
-                    days=search_days,
-                    topic=dim['tavily_topic'],
+                search_kwargs["topic"] = dim['tavily_topic']
+            elif isinstance(provider, BraveSearchProvider):
+                search_kwargs.update(
+                    self._brave_search_locale(
+                        stock_code,
+                        prefer_chinese=False if is_jp else self._should_prefer_chinese_news(stock_code, stock_name),
+                    )
                 )
-            else:
-                response = provider.search(
-                    dim['query'],
-                    max_results=provider_max_results,
-                    days=search_days,
-                )
+
+            response = provider.search(
+                dim['query'],
+                max_results=provider_max_results,
+                days=search_days,
+                **search_kwargs,
+            )
+
             if dim['strict_freshness']:
                 filtered_response = self._filter_news_response(
                     response,
@@ -3146,9 +3225,10 @@ class SearchService:
                     response,
                     max_results=target_per_dimension,
                 )
+
             results[dim['name']] = filtered_response
             search_count += 1
-            
+
             if response.success:
                 logger.info(
                     "[情报搜索] %s: 原始=%s条, 过滤后=%s条",
@@ -3158,12 +3238,11 @@ class SearchService:
                 )
             else:
                 logger.warning(f"[情报搜索] {dim['desc']}: 搜索失败 - {response.error_message}")
-            
-            # 短暂延迟避免请求过快
+
             time.sleep(0.5)
-        
+
         return results
-    
+
     def format_intel_report(self, intel_results: Dict[str, SearchResponse], stock_name: str) -> str:
         """
         格式化情报搜索结果为报告
@@ -3288,7 +3367,10 @@ class SearchService:
         
         # 使用多个关键词模板搜索
         is_foreign = self._is_foreign_stock(stock_code)
-        keywords = self.ENHANCED_SEARCH_KEYWORDS_EN if is_foreign else self.ENHANCED_SEARCH_KEYWORDS
+        if self._is_jp_stock(stock_code):
+            keywords = self.ENHANCED_SEARCH_KEYWORDS_JP
+        else:
+            keywords = self.ENHANCED_SEARCH_KEYWORDS_EN if is_foreign else self.ENHANCED_SEARCH_KEYWORDS
         for i, keyword_template in enumerate(keywords[:max_attempts]):
             query = keyword_template.format(name=stock_name, code=stock_code)
             
@@ -3334,7 +3416,7 @@ class SearchService:
             logger.info(f"[增强搜索] 完成，共获取 {len(final_results)} 条结果（来源: {provider_str}）")
             
             return SearchResponse(
-                query=f"{stock_name}({stock_code}) 股价走势",
+                query=f"{stock_name}({stock_code}) 产业与行情搜索",
                 results=final_results,
                 provider=provider_str,
                 success=True,
@@ -3342,7 +3424,7 @@ class SearchService:
         else:
             logger.warning(f"[增强搜索] 所有搜索均未返回结果")
             return SearchResponse(
-                query=f"{stock_name}({stock_code}) 股价走势",
+                query=f"{stock_name}({stock_code}) 产业与行情搜索",
                 results=[],
                 provider="None",
                 success=False,
