@@ -1,20 +1,24 @@
 # -*- coding: utf-8 -*-
 """
 ===================================
-趋势交易分析器 - 基于用户交易理念
+AI产业趋势分析器（日本成长股研究版）
 ===================================
 
-交易理念核心原则：
-1. 严进策略 - 不追高，追求每笔交易成功率
-2. 趋势交易 - MA5>MA10>MA20 多头排列，顺势而为
-3. 效率优先 - 关注筹码结构好的股票
-4. 买点偏好 - 在 MA5/MA10 附近回踩买入
+核心理念：
+1. 产业趋势优先于短期波动
+2. 关注AI、半导体、HBM、先进封装等长期主线
+3. 技术面仅作为辅助，不做超短线交易
+4. 强调风险收益比，而不是追求短期暴利
+5. 适用于日本成长股 / 美股科技股 / AI产业链观察
 
-技术标准：
-- 多头排列：MA5 > MA10 > MA20
-- 乖离率：(Close - MA5) / MA5 < 5%（不追高）
-- 量能形态：缩量回调优先
+核心变化：
+- 弱化“A股短线交易”逻辑
+- 删除“洗盘”“主力”等推测性语言
+- 降低MA5短线权重
+- 强化中期趋势与风险控制
+- 更适合长期跟踪型投资
 """
+
 
 import logging
 from dataclasses import dataclass, field
@@ -31,13 +35,13 @@ logger = logging.getLogger(__name__)
 
 class TrendStatus(Enum):
     """趋势状态枚举"""
-    STRONG_BULL = "强势多头"      # MA5 > MA10 > MA20，且间距扩大
+    STRONG_BULL = "偏强多头"      # MA5 > MA10 > MA20，且间距扩大
     BULL = "多头排列"             # MA5 > MA10 > MA20
-    WEAK_BULL = "弱势多头"        # MA5 > MA10，但 MA10 < MA20
+    WEAK_BULL = "偏弱多头"        # MA5 > MA10，但 MA10 < MA20
     CONSOLIDATION = "盘整"        # 均线缠绕
-    WEAK_BEAR = "弱势空头"        # MA5 < MA10，但 MA10 > MA20
+    WEAK_BEAR = "偏弱空头"        # MA5 < MA10，但 MA10 > MA20
     BEAR = "空头排列"             # MA5 < MA10 < MA20
-    STRONG_BEAR = "强势空头"      # MA5 < MA10 < MA20，且间距扩大
+    STRONG_BEAR = "偏强空头"      # MA5 < MA10 < MA20，且间距扩大
 
 
 class VolumeStatus(Enum):
@@ -50,13 +54,13 @@ class VolumeStatus(Enum):
 
 
 class BuySignal(Enum):
-    """买入信号枚举"""
-    STRONG_BUY = "强烈买入"       # 多条件满足
-    BUY = "买入"                  # 基本条件满足
-    HOLD = "持有"                 # 已持有可继续
-    WAIT = "观望"                 # 等待更好时机
-    SELL = "卖出"                 # 趋势转弱
-    STRONG_SELL = "强烈卖出"      # 趋势破坏
+    """积极观察信号枚举"""
+    STRONG_BUY = "趋势强化"       # 多条件满足
+    BUY = "积极观察"                  # 基本条件满足
+    HOLD = "中性观察"                 # 已中性观察可继续
+    WAIT = "继续观察"                 # 等待更好时机
+    SELL = "趋势转弱"                 # 趋势转弱
+    STRONG_SELL = "强烈趋势转弱"      # 趋势破坏
 
 
 class MACDStatus(Enum):
@@ -73,9 +77,9 @@ class MACDStatus(Enum):
 class RSIStatus(Enum):
     """RSI状态枚举"""
     OVERBOUGHT = "超买"        # RSI > 70
-    STRONG_BUY = "强势买入"    # 50 < RSI < 70
+    STRONG_BUY = "偏强积极观察"    # 50 < RSI < 70
     NEUTRAL = "中性"          # 40 <= RSI <= 60
-    WEAK = "弱势"             # 30 < RSI < 40
+    WEAK = "偏弱"             # 30 < RSI < 40
     OVERSOLD = "超卖"         # RSI < 30
 
 
@@ -126,7 +130,7 @@ class TrendAnalysisResult:
     rsi_status: RSIStatus = RSIStatus.NEUTRAL
     rsi_signal: str = ""              # RSI 信号描述
 
-    # 买入信号
+    # 积极观察信号
     buy_signal: BuySignal = BuySignal.WAIT
     signal_score: int = 0            # 综合评分 0-100
     signal_reasons: List[str] = field(default_factory=list)
@@ -170,15 +174,20 @@ class TrendAnalysisResult:
 
 class StockTrendAnalyzer:
     """
-    股票趋势分析器
+    AI产业趋势分析器
 
-    基于用户交易理念实现：
-    1. 趋势判断 - MA5>MA10>MA20 多头排列
-    2. 乖离率检测 - 不追高，偏离 MA5 超过 5% 不买
-    3. 量能分析 - 偏好缩量回调
-    4. 买点识别 - 回踩 MA5/MA10 支撑
-    5. MACD 指标 - 趋势确认和金叉死叉信号
-    6. RSI 指标 - 超买超卖判断
+    适用方向：
+    - 日本半导体
+    - AI产业链
+    - HBM / CoWoS
+    - 半导体材料
+    - 半导体设备
+    - 美股AI科技股
+
+    不适用于：
+    - 超短线打板
+    - 高频交易
+    - 日内投机
     """
     
     # 交易参数配置（BIAS_THRESHOLD 从 Config 读取，见 _generate_signal）
@@ -256,7 +265,7 @@ class StockTrendAnalyzer:
         # 6. RSI 分析
         self._analyze_rsi(df, result)
 
-        # 7. 生成买入信号
+        # 7. 生成积极观察信号
         self._generate_signal(result)
 
         return result
@@ -346,14 +355,14 @@ class StockTrendAnalyzer:
         
         # 判断均线排列
         if ma5 > ma10 > ma20:
-            # 检查间距是否在扩大（强势）
+            # 检查间距是否在扩大（偏强）
             prev = df.iloc[-5] if len(df) >= 5 else df.iloc[-1]
             prev_spread = (prev['MA5'] - prev['MA20']) / prev['MA20'] * 100 if prev['MA20'] > 0 else 0
             curr_spread = (ma5 - ma20) / ma20 * 100 if ma20 > 0 else 0
             
             if curr_spread > prev_spread and curr_spread > 5:
                 result.trend_status = TrendStatus.STRONG_BULL
-                result.ma_alignment = "强势多头排列，均线发散上行"
+                result.ma_alignment = "偏强多头排列，均线发散上行"
                 result.trend_strength = 90
             else:
                 result.trend_status = TrendStatus.BULL
@@ -362,7 +371,7 @@ class StockTrendAnalyzer:
                 
         elif ma5 > ma10 and ma10 <= ma20:
             result.trend_status = TrendStatus.WEAK_BULL
-            result.ma_alignment = "弱势多头，MA5>MA10 但 MA10≤MA20"
+            result.ma_alignment = "偏弱多头，MA5>MA10 但 MA10≤MA20"
             result.trend_strength = 55
             
         elif ma5 < ma10 < ma20:
@@ -372,7 +381,7 @@ class StockTrendAnalyzer:
             
             if curr_spread > prev_spread and curr_spread > 5:
                 result.trend_status = TrendStatus.STRONG_BEAR
-                result.ma_alignment = "强势空头排列，均线发散下行"
+                result.ma_alignment = "偏强空头排列，均线发散下行"
                 result.trend_strength = 10
             else:
                 result.trend_status = TrendStatus.BEAR
@@ -381,7 +390,7 @@ class StockTrendAnalyzer:
                 
         elif ma5 < ma10 and ma10 >= ma20:
             result.trend_status = TrendStatus.WEAK_BEAR
-            result.ma_alignment = "弱势空头，MA5<MA10 但 MA10≥MA20"
+            result.ma_alignment = "偏弱空头，MA5<MA10 但 MA10≥MA20"
             result.trend_strength = 40
             
         else:
@@ -439,7 +448,7 @@ class StockTrendAnalyzer:
                 result.volume_trend = "缩量上涨，上攻动能不足"
             else:
                 result.volume_status = VolumeStatus.SHRINK_VOLUME_DOWN
-                result.volume_trend = "缩量回调，洗盘特征明显（好）"
+                result.volume_trend = "缩量回调，抛压相对有限"
         else:
             result.volume_status = VolumeStatus.NORMAL
             result.volume_trend = "量能正常"
@@ -482,7 +491,7 @@ class StockTrendAnalyzer:
         分析 MACD 指标
 
         核心信号：
-        - 零轴上金叉：最强买入信号
+        - 零轴上金叉：最强积极观察信号
         - 金叉：DIF 上穿 DEA
         - 死叉：DIF 下穿 DEA
         """
@@ -517,13 +526,13 @@ class StockTrendAnalyzer:
         # 判断 MACD 状态
         if is_golden_cross and curr_zero > 0:
             result.macd_status = MACDStatus.GOLDEN_CROSS_ZERO
-            result.macd_signal = "⭐ 零轴上金叉，强烈买入信号！"
+            result.macd_signal = "⭐ 零轴上金叉，趋势强化信号！"
         elif is_crossing_up:
             result.macd_status = MACDStatus.CROSSING_UP
             result.macd_signal = "⚡ DIF上穿零轴，趋势转强"
         elif is_golden_cross:
             result.macd_status = MACDStatus.GOLDEN_CROSS
-            result.macd_signal = "✅ 金叉，趋势向上"
+            result.macd_signal = "✅ 金叉，趋势改善"
         elif is_death_cross:
             result.macd_status = MACDStatus.DEATH_CROSS
             result.macd_signal = "❌ 死叉，趋势向下"
@@ -569,20 +578,20 @@ class StockTrendAnalyzer:
             result.rsi_signal = f"⚠️ RSI超买({rsi_mid:.1f}>70)，短期回调风险高"
         elif rsi_mid > 60:
             result.rsi_status = RSIStatus.STRONG_BUY
-            result.rsi_signal = f"✅ RSI强势({rsi_mid:.1f})，多头力量充足"
+            result.rsi_signal = f"✅ RSI偏强({rsi_mid:.1f})，多头力量充足"
         elif rsi_mid >= 40:
             result.rsi_status = RSIStatus.NEUTRAL
             result.rsi_signal = f" RSI中性({rsi_mid:.1f})，震荡整理中"
         elif rsi_mid >= self.RSI_OVERSOLD:
             result.rsi_status = RSIStatus.WEAK
-            result.rsi_signal = f"⚡ RSI弱势({rsi_mid:.1f})，关注反弹"
+            result.rsi_signal = f"⚡ RSI偏弱({rsi_mid:.1f})，关注反弹"
         else:
             result.rsi_status = RSIStatus.OVERSOLD
-            result.rsi_signal = f"⭐ RSI超卖({rsi_mid:.1f}<30)，反弹机会大"
+            result.rsi_signal = f"⭐ RSI超卖({rsi_mid:.1f}<30)，可能进入超跌观察区"
 
     def _generate_signal(self, result: TrendAnalysisResult) -> None:
         """
-        生成买入信号
+        生成积极观察信号
 
         综合评分系统：
         - 趋势（30分）：多头排列得分高
@@ -590,7 +599,7 @@ class StockTrendAnalyzer:
         - 量能（15分）：缩量回调得分高
         - 支撑（10分）：获得均线支撑得分高
         - MACD（15分）：金叉和多头得分高
-        - RSI（10分）：超卖和强势得分高
+        - RSI（10分）：超卖和偏强得分高
         """
         score = 0
         reasons = []
@@ -610,11 +619,11 @@ class StockTrendAnalyzer:
         score += trend_score
 
         if result.trend_status in [TrendStatus.STRONG_BULL, TrendStatus.BULL]:
-            reasons.append(f"✅ {result.trend_status.value}，顺势做多")
+            reasons.append(f"✅ {result.trend_status.value}，中期趋势保持正向")
         elif result.trend_status in [TrendStatus.BEAR, TrendStatus.STRONG_BEAR]:
-            risks.append(f"⚠️ {result.trend_status.value}，不宜做多")
+            risks.append(f"⚠️ {result.trend_status.value}，趋势偏弱，建议谨慎观察")
 
-        # === 乖离率评分（20分，强势趋势补偿）===
+        # === 乖离率评分（20分，偏强趋势补偿）===
         bias = result.bias_ma5
         if bias != bias or bias is None:  # NaN or None defense
             bias = 0.0
@@ -633,48 +642,48 @@ class StockTrendAnalyzer:
             # Price below MA5 (pullback)
             if bias > -3:
                 score += 20
-                reasons.append(f"✅ 价格略低于MA5({bias:.1f}%)，回踩买点")
+                reasons.append(f"✅ 价格略低于MA5({bias:.1f}%)，接近中期支撑区域")
             elif bias > -5:
                 score += 16
-                reasons.append(f"✅ 价格回踩MA5({bias:.1f}%)，观察支撑")
+                reasons.append(f"✅ 价格回踩MA5({bias:.1f}%)，观察中期趋势是否稳定")
             else:
                 score += 8
                 risks.append(f"⚠️ 乖离率过大({bias:.1f}%)，可能破位")
         elif bias < 2:
             score += 18
-            reasons.append(f"✅ 价格贴近MA5({bias:.1f}%)，介入好时机")
+            reasons.append(f"✅ 价格接近短期均线({bias:.1f}%)，趋势位置相对合理")
         elif bias < base_threshold:
             score += 14
-            reasons.append(f"⚡ 价格略高于MA5({bias:.1f}%)，可小仓介入")
+            reasons.append(f"⚡ 价格温和高于短期均线({bias:.1f}%)，可继续观察趋势延续性")
         elif bias > effective_threshold:
             score += 4
             risks.append(
-                f"❌ 乖离率过高({bias:.1f}%>{effective_threshold:.1f}%)，严禁追高！"
+                f"❌ 乖离率过高({bias:.1f}%>{effective_threshold:.1f}%)，短期乖离偏大，注意波动风险！"
             )
         elif bias > base_threshold and is_strong_trend:
             score += 10
             reasons.append(
-                f"⚡ 强势趋势中乖离率偏高({bias:.1f}%)，可轻仓追踪"
+                f"⚡ 偏强趋势中乖离率偏高({bias:.1f}%)，可轻仓追踪"
             )
         else:
             score += 4
             risks.append(
-                f"❌ 乖离率过高({bias:.1f}%>{base_threshold:.1f}%)，严禁追高！"
+                f"❌ 乖离率过高({bias:.1f}%>{base_threshold:.1f}%)，短期乖离偏大，注意波动风险！"
             )
 
         # === 量能评分（15分）===
         volume_scores = {
-            VolumeStatus.SHRINK_VOLUME_DOWN: 15,  # 缩量回调最佳
+            VolumeStatus.SHRINK_VOLUME_DOWN: 15,  # 缩量回调较优
             VolumeStatus.HEAVY_VOLUME_UP: 12,     # 放量上涨次之
             VolumeStatus.NORMAL: 10,
             VolumeStatus.SHRINK_VOLUME_UP: 6,     # 无量上涨较差
-            VolumeStatus.HEAVY_VOLUME_DOWN: 0,    # 放量下跌最差
+            VolumeStatus.HEAVY_VOLUME_DOWN: 0,    # 放量下跌较弱
         }
         vol_score = volume_scores.get(result.volume_status, 8)
         score += vol_score
 
         if result.volume_status == VolumeStatus.SHRINK_VOLUME_DOWN:
-            reasons.append("✅ 缩量回调，主力洗盘")
+            reasons.append("✅ 缩量回调，缩量调整")
         elif result.volume_status == VolumeStatus.HEAVY_VOLUME_DOWN:
             risks.append("⚠️ 放量下跌，注意风险")
 
@@ -708,11 +717,11 @@ class StockTrendAnalyzer:
 
         # === RSI 评分（10分）===
         rsi_scores = {
-            RSIStatus.OVERSOLD: 10,       # 超卖最佳
-            RSIStatus.STRONG_BUY: 8,     # 强势
+            RSIStatus.OVERSOLD: 10,       # 超卖较优
+            RSIStatus.STRONG_BUY: 8,     # 偏强
             RSIStatus.NEUTRAL: 5,        # 中性
-            RSIStatus.WEAK: 3,            # 弱势
-            RSIStatus.OVERBOUGHT: 0,       # 超买最差
+            RSIStatus.WEAK: 3,            # 偏弱
+            RSIStatus.OVERBOUGHT: 0,       # 超买较弱
         }
         rsi_score = rsi_scores.get(result.rsi_status, 5)
         score += rsi_score
@@ -729,7 +738,7 @@ class StockTrendAnalyzer:
         result.signal_reasons = reasons
         result.risk_factors = risks
 
-        # 生成买入信号（调整阈值以适应新的100分制）
+        # 生成积极观察信号（调整阈值以适应新的100分制）
         if score >= 75 and result.trend_status in [TrendStatus.STRONG_BULL, TrendStatus.BULL]:
             result.buy_signal = BuySignal.STRONG_BUY
         elif score >= 60 and result.trend_status in [TrendStatus.STRONG_BULL, TrendStatus.BULL, TrendStatus.WEAK_BULL]:
@@ -782,13 +791,13 @@ class StockTrendAnalyzer:
             f"   RSI(24): {result.rsi_24:.1f}",
             f"   信号: {result.rsi_signal}",
             f"",
-            f"🎯 操作建议: {result.buy_signal.value}",
+            f"🧭 趋势判断: {result.buy_signal.value}",
             f"   综合评分: {result.signal_score}/100",
         ]
 
         if result.signal_reasons:
             lines.append(f"")
-            lines.append(f"✅ 买入理由:")
+            lines.append(f"✅ 积极观察理由:")
             for reason in result.signal_reasons:
                 lines.append(f"   {reason}")
 
