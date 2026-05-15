@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
 """
 ===================================
-大盘复盘分析模块
+AI产业链市场复盘分析模块
 ===================================
 
 职责：
-1. 获取大盘指数数据（上证、深证、创业板）
+1. 获取主要市场指数数据（A股/港股/美股/日股）
 2. 搜索市场新闻形成复盘情报
-3. 使用大模型生成每日大盘复盘报告
+3. 使用大模型生成面向AI产业链与中长期投资的每日市场复盘报告
 """
 
 import logging
@@ -117,13 +117,13 @@ class MarketAnalyzer:
         Args:
             search_service: 搜索服务实例
             analyzer: AI分析器实例（用于调用LLM）
-            region: 市场区域 cn=A股 us=美股
+            region: 市场区域 cn=A股 us=美股 hk=港股 jp=日股
         """
         self.config = get_config()
         self.search_service = search_service
         self.analyzer = analyzer
         self.data_manager = DataFetcherManager()
-        self.region = region if region in ("cn", "us", "hk") else "cn"
+        self.region = region if region in ("cn", "us", "hk", "jp") else "cn"
         self.profile: MarketProfile = get_profile(self.region)
         self.strategy = get_market_strategy_blueprint(self.region)
 
@@ -146,6 +146,8 @@ class MarketAnalyzer:
             return "US market"
         if self.region == "hk":
             return "Hong Kong market" if review_language == "en" else "港股市场"
+        if self.region == "jp":
+            return "Japanese market" if review_language == "en" else "日股市场"
         if review_language == "en":
             return "A-share market"
         return "A股市场"
@@ -156,6 +158,8 @@ class MarketAnalyzer:
             return "USD bn" if self._get_review_language() == "en" else "十亿美元"
         if self.region == "hk":
             return "HKD bn" if self._get_review_language() == "en" else "十亿港元"
+        if self.region == "jp":
+            return "JPY bn" if self._get_review_language() == "en" else "十亿日元"
         return "CNY 100m" if self._get_review_language() == "en" else "亿"
 
     def _format_turnover_value(self, amount_raw: float) -> str:
@@ -170,9 +174,11 @@ class MarketAnalyzer:
 
     def _get_review_title(self, date: str) -> str:
         if self._get_review_language() == "en":
-            market_names = {"us": "US Market Recap", "hk": "HK Market Recap"}
+            market_names = {"us": "US Market Recap", "hk": "HK Market Recap", "jp": "Japan AI/Semiconductor Market Recap"}
             market_name = market_names.get(self.region, "A-share Market Recap")
             return f"## {date} {market_name}"
+        if self.region == "jp":
+            return f"## {date} 日股AI产业链复盘"
         return f"## {date} 大盘复盘"
 
     def _get_index_hint(self) -> str:
@@ -181,10 +187,53 @@ class MarketAnalyzer:
                 return "Analyze the key moves in the S&P 500, Nasdaq, Dow, and other major indices."
             if self.region == "hk":
                 return "Analyze the key moves in the HSI, Hang Seng Tech, HSCEI, and other major indices."
+            if self.region == "jp":
+                return "Analyze the key moves in the Nikkei 225, TOPIX, JPX Prime 150, and Japan semiconductor-related indices if available."
             return "Analyze the price action in the SSE, SZSE, ChiNext, and other major indices."
+        if self.region == "jp":
+            return "分析日经225、TOPIX、日本半导体相关指数及AI产业链风险偏好的变化。"
         return self.profile.prompt_index_hint
 
     def _get_strategy_prompt_block(self) -> str:
+        if self.region == "jp":
+            if self._get_review_language() == "en":
+                return """## Strategy Blueprint: Japan AI/Semiconductor Market Research
+Focus on the Japanese equity market through AI capex, semiconductor cycle, JPY FX, and global tech risk appetite.
+
+### Strategy Principles
+- Treat Japan semiconductor, materials, equipment, and electronic component names as part of the global AI supply chain.
+- Use Nikkei/TOPIX trend as the market regime, but prioritize AI/semiconductor leadership and earnings guidance.
+- Avoid speculative short-term trading language; frame conclusions as trend, risk, and research priorities.
+
+### Analysis Dimensions
+- Global AI Cycle: NVIDIA, TSMC capex, HBM, CoWoS, AI servers, cloud capex.
+- Japan Supply Chain: semiconductor materials, silicon wafers, equipment, PCB/ABF substrates, precision components.
+- Macro Overlay: JPY moves, BOJ policy, US rates, global tech drawdown risk.
+- Risk Control: valuation overheating, earnings miss, cycle reversal, and theme crowding.
+
+### Action Framework
+- Constructive: AI cycle and Japan semiconductor leadership both improving.
+- Neutral: global AI trend remains intact but Japan market breadth or FX is mixed.
+- Defensive: global tech corrects, JPY strengthens sharply, or semiconductor earnings guidance deteriorates."""
+            return """## 策略框架：日股AI/半导体产业链复盘
+重点不是短线买卖，而是判断日本市场中AI产业链、半导体材料/设备、电子零部件的中长期趋势是否强化。
+
+### 分析原则
+- 将日股半导体、材料、设备、电子零部件放在全球AI产业链中分析。
+- 先看全球AI资本开支、NVIDIA、台积电、HBM、CoWoS，再看日本个股与板块表现。
+- 技术面用于判断风险偏好和趋势强弱，不用于短线喊单。
+- 避免“主力洗盘”“低吸狙击”“今日内”等A股短线语言。
+
+### 分析维度
+- 全球AI周期：NVIDIA业绩、云厂商资本开支、AI服务器、HBM、CoWoS。
+- 日本产业链：半导体材料、硅片、设备、PCB/ABF载板、精密零部件。
+- 宏观环境：日元汇率、日本央行政策、美国利率、全球科技股风险偏好。
+- 风险控制：估值透支、财报不及预期、行业周期回落、主题过度拥挤。
+
+### 结论框架
+- 趋势强化：AI主线与日本半导体链同时改善。
+- 中性观察：AI主线未破坏，但日股市场宽度、汇率或估值存在分歧。
+- 风险上升：全球科技股回调、日元快速升值或半导体财报指引恶化。"""
         if self.region == "hk" and self._get_review_language() == "en":
             return """## Strategy Blueprint: Hong Kong Market Regime Strategy
 Focus on HSI trend, southbound flow dynamics, and sector rotation to define next-session risk posture.
@@ -243,6 +292,18 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
 
     def _get_strategy_markdown_block(self, review_language: str | None = None) -> str:
         review_language = review_language or self._get_review_language()
+        if self.region == "jp":
+            if review_language == "en":
+                return """### 6. Strategy Framework
+- **AI Cycle**: Track NVIDIA, TSMC capex, HBM, CoWoS, and cloud capex.
+- **Japan Supply Chain**: Focus on semiconductor materials, equipment, silicon wafers, PCB/ABF substrates, and precision components.
+- **Macro Overlay**: Watch JPY, BOJ policy, US rates, and global tech risk appetite.
+"""
+            return """### 六、研究框架
+- **AI周期**：跟踪NVIDIA、台积电资本开支、HBM、CoWoS、云厂商资本开支。
+- **日本产业链**：关注半导体材料、设备、硅片、PCB/ABF载板、精密零部件。
+- **宏观变量**：关注日元、日本央行、美国利率和全球科技股风险偏好。
+"""
         if self.region == "hk" and review_language == "en":
             return """### 6. Strategy Framework
 - **Trend Regime**: Classify the market as momentum, range, or risk-off based on HSI/HSTECH/HSCEI alignment.
@@ -422,7 +483,7 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
             logger.info("[大盘] 开始搜索市场新闻...")
             
             # 根据 region 设置搜索上下文名称，避免美股搜索被解读为 A 股语境
-            market_names = {"cn": "大盘", "us": "US market", "hk": "HK market"}
+            market_names = {"cn": "大盘", "us": "US market", "hk": "HK market", "jp": "Japanese AI semiconductor market"}
             market_name = market_names.get(self.region, "大盘")
             for query in search_queries:
                 response = self.search_service.search_stock_news(
@@ -1000,14 +1061,14 @@ Output the report content directly, no extra commentary.
 """
 
         # A 股场景使用中文提示语
-        return f"""你是一位专业的A/H/美股市场分析师，请根据以下数据生成一份结构化的{self._get_market_scope_name('zh')}大盘复盘报告。
+        return f"""你是一位专业的日本/全球AI产业链市场研究员，请根据以下数据生成一份结构化的{self._get_market_scope_name('zh')}市场复盘报告。
 
 【重要】输出要求：
 - 必须输出纯 Markdown 文本格式
 - 禁止输出 JSON 格式
 - 禁止输出代码块
 - emoji 仅在标题处少量使用（每个标题最多1个）
-- 报告要像交易员盘后工作台：先给结论，再按数据表、主线、催化、计划展开
+- 报告要像机构研究员的盘后研究笔记：先给结论，再按市场状态、AI产业链、催化、风险展开
 - 不要重复列出已由系统注入的表格数据；正文负责解释表格背后的含义
 
 ---
@@ -1054,8 +1115,8 @@ Output the report content directly, no extra commentary.
 ### 五、消息催化
 （结合近三日新闻，提炼真正影响明日交易的催化或扰动）
 
-### 六、明日交易计划
-（给出进攻/均衡/防守结论、仓位区间、关注方向、回避方向和一个触发失效条件）
+### 六、后续观察计划
+（给出趋势强化/中性观察/风险上升结论、关注方向、回避方向和一个逻辑失效条件）
 
 ### 七、风险提示
 （列出需要关注的风险点；最后补充“建议仅供参考，不构成投资建议”。）
@@ -1123,7 +1184,7 @@ Output the report content directly, no extra commentary.
 - **Leaders**: {top_text or "N/A"}
 - **Laggards**: {bottom_text or "N/A"}
 """
-            market_names = {"us": "US Market Recap", "hk": "HK Market Recap"}
+            market_names = {"us": "US Market Recap", "hk": "HK Market Recap", "jp": "Japan AI/Semiconductor Market Recap"}
             market_name = market_names.get(self.region, "A-share Market Recap")
             report = f"""## {overview.date} {market_name}
 
@@ -1144,7 +1205,7 @@ Market conditions can change quickly. The data above is for reference only and d
 """
             return report
 
-        market_labels = {"cn": "A股", "us": "美股", "hk": "港股"}
+        market_labels = {"cn": "A股", "us": "美股", "hk": "港股", "jp": "日股AI产业链"}
         market_label = market_labels.get(self.region, "A股")
         dashboard_block = self._build_stats_block(overview)
         indices_block = self._build_indices_block(overview)
@@ -1168,11 +1229,12 @@ Market conditions can change quickly. The data above is for reference only and d
 ### 五、消息催化
 - 暂无可用新闻时，应降低对题材持续性的确定性判断。
 
-### 六、明日交易计划
-- **结论**：均衡观察。
-- **仓位**：控制在中性区间，等待指数与主线共振。
-- **关注方向**：{top_text or "强于指数的主线板块"}。
+### 六、后续观察计划
+- **结论**：中性观察。
+- **配置思路**：控制单一主题暴露，等待指数、财报与AI产业链信号共振。
+- **关注方向**：{top_text or "强于指数的AI/半导体相关方向"}。
 - **回避方向**：{bottom_text or "连续走弱且缺少修复信号的方向"}。
+- **逻辑失效条件**：全球科技股明显转弱、日元快速升值或半导体财报指引恶化。
 
 ### 七、风险提示
 - 市场有风险，投资需谨慎。以上数据仅供参考，不构成投资建议。
