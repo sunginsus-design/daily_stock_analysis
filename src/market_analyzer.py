@@ -24,6 +24,11 @@ from src.report_language import normalize_report_language
 from src.search_service import SearchService
 from src.core.market_profile import get_profile, MarketProfile
 from src.core.market_strategy import get_market_strategy_blueprint
+try:
+    from src.core.ai_chain_watchlist import AI_CHAIN_WATCHLIST
+except (ImportError, ModuleNotFoundError):
+    # Fallback keeps this module importable before src/core/ai_chain_watchlist.py is added.
+    AI_CHAIN_WATCHLIST = {}
 from data_provider.base import DataFetcherManager
 
 logger = logging.getLogger(__name__)
@@ -93,6 +98,9 @@ class MarketOverview:
     top_sectors: List[Dict] = field(default_factory=list)     # 涨幅前5板块
     bottom_sectors: List[Dict] = field(default_factory=list)  # 跌幅前5板块
 
+    # AI产业链行情：global_ai_core / japan_semiconductor
+    ai_chain: Dict[str, List[Dict[str, Any]]] = field(default_factory=dict)
+
 
 class MarketAnalyzer:
     """
@@ -152,6 +160,7 @@ class MarketAnalyzer:
         self.region = requested_region if requested_region in ("cn", "us", "hk", "jp") else "jp"
         self.profile: MarketProfile = get_profile(self.region)
         self.strategy = get_market_strategy_blueprint(self.region)
+        self.ai_watchlist = AI_CHAIN_WATCHLIST if isinstance(AI_CHAIN_WATCHLIST, dict) else {}
 
     def _get_review_language(self) -> str:
         configured = normalize_report_language(
@@ -443,6 +452,10 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         # 1. 获取主要指数行情（按 region 切换）
         overview.indices = self._get_main_indices()
 
+        # 1.5 JP/AI mode: add global AI chain and Japan semiconductor chain quotes.
+        if self.region == "jp":
+            overview.ai_chain = self._get_ai_chain_market_data()
+
         # JP/AI mode: never use A-share market breadth, limit-up/down,
         # A-share turnover, or A-share sector rankings.
         if self.region == "jp":
@@ -515,6 +528,85 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
             if idx.current and idx.current > 0:
                 valid.append(idx)
         return valid
+
+    @staticmethod
+    def _normalize_watchlist_categories(watchlist: Dict[str, Any]) -> Dict[str, Dict[str, str]]:
+        """Normalize AI chain watchlist config into {category: {code: name}}."""
+        normalized: Dict[str, Dict[str, str]] = {}
+        if not isinstance(watchlist, dict):
+            return normalized
+
+        for category, value in watchlist.items():
+            if not isinstance(value, dict):
+                continue
+
+            # Preferred format: {"NVDA": "NVIDIA", "4063.T": "信越化学"}
+            if all(isinstance(k, str) and isinstance(v, str) for k, v in value.items()):
+                normalized[category] = {
+                    str(k).strip(): str(v).strip()
+                    for k, v in value.items()
+                    if str(k).strip()
+                }
+                continue
+
+            # Compatible format: {"symbols": {"NVDA": "NVIDIA", ...}}
+            symbols = value.get("symbols") or value.get("stocks") or value.get("tickers")
+            if isinstance(symbols, dict):
+                normalized[category] = {
+                    str(k).strip(): str(v).strip()
+                    for k, v in symbols.items()
+                    if str(k).strip()
+                }
+
+        return normalized
+
+    def _get_ai_chain_market_data(self) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        获取全球AI产业链与日本半导体链行情。
+
+        macro_indices 通常已经通过 _get_main_indices() 获取，避免在这里重复请求。
+        单个标的失败时只记录 warning，不影响整体报告生成。
+        """
+        result: Dict[str, List[Dict[str, Any]]] = {
+            "global_ai_core": [],
+            "japan_semiconductor": [],
+        }
+
+        watchlist = self._normalize_watchlist_categories(self.ai_watchlist)
+        if not watchlist:
+            return result
+
+        for category in ("global_ai_core", "japan_semiconductor"):
+            stock_map = watchlist.get(category, {})
+            for code, name in stock_map.items():
+                try:
+                    quote = self.data_manager.get_realtime_quote(code, log_final_failure=False)
+                    if not quote:
+                        continue
+
+                    price = getattr(quote, "price", None)
+                    change_pct = getattr(quote, "change_pct", None)
+                    if price is None and change_pct is None:
+                        continue
+
+                    result.setdefault(category, []).append({
+                        "code": code,
+                        "name": name,
+                        "price": price,
+                        "change_pct": change_pct,
+                        "volume": getattr(quote, "volume", None),
+                        "source": str(getattr(quote, "source", "") or ""),
+                    })
+                except Exception as exc:
+                    logger.warning("[AI链] 获取行情失败: %s %s, %s", category, code, exc)
+                    continue
+
+        total_count = sum(len(items) for items in result.values())
+        if total_count:
+            logger.info("[AI链] 获取到 %d 个AI产业链标的行情", total_count)
+        else:
+            logger.warning("[AI链] 未获取到可用AI产业链标的行情")
+        return result
 
     def _get_market_statistics(self, overview: MarketOverview):
         """获取市场涨跌统计"""
@@ -853,6 +945,9 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
             for idx in overview.indices:
                 arrow = "↓" if idx.change_pct < 0 else "↑" if idx.change_pct > 0 else "→"
                 lines.append(f"- {idx.name}: {idx.current:.2f} ({arrow}{abs(idx.change_pct):.2f}%)")
+            ai_chain_block = self._build_ai_chain_block(overview)
+            if ai_chain_block:
+                lines.extend(["", ai_chain_block])
             return "\n".join(lines)
         if self._get_review_language() == "en":
             lines = [
@@ -917,6 +1012,71 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
                     f"| {rank} | {sector.get('name', '-')} | {self._format_signed_pct(sector.get('change_pct'))} |"
                 )
         return "\n".join(lines)
+
+    def _build_ai_chain_block(self, overview: MarketOverview) -> str:
+        """Build AI chain quote block for Japan AI/semiconductor review."""
+        ai_chain = getattr(overview, "ai_chain", None) or {}
+        if not ai_chain:
+            return ""
+
+        category_titles = {
+            "global_ai_core": "全球AI核心资产",
+            "japan_semiconductor": "日本半导体链",
+        }
+        lines: List[str] = []
+
+        for category in ("global_ai_core", "japan_semiconductor"):
+            items = ai_chain.get(category) or []
+            if not items:
+                continue
+
+            lines.append(f"#### {category_titles.get(category, category)}")
+            for item in items:
+                name = item.get("name") or item.get("code") or "-"
+                code = item.get("code") or "-"
+                price = item.get("price")
+                change_pct = item.get("change_pct")
+
+                price_text = "N/A" if price is None else f"{float(price):.2f}"
+                if change_pct is None:
+                    change_text = "N/A"
+                else:
+                    change_value = float(change_pct)
+                    arrow = "↑" if change_value > 0 else "↓" if change_value < 0 else "→"
+                    change_text = f"{arrow}{abs(change_value):.2f}%"
+
+                lines.append(f"- {name}（{code}）: {price_text} ({change_text})")
+
+        return "\n".join(lines)
+
+    def _format_ai_chain_prompt(self, overview: MarketOverview) -> str:
+        """Format AI chain quote data for the LLM prompt."""
+        ai_chain = getattr(overview, "ai_chain", None) or {}
+        if not ai_chain:
+            return "暂无AI产业链个股行情数据。"
+
+        blocks: List[str] = []
+        category_titles = {
+            "global_ai_core": "全球AI核心资产",
+            "japan_semiconductor": "日本半导体链",
+        }
+
+        for category in ("global_ai_core", "japan_semiconductor"):
+            items = ai_chain.get(category) or []
+            if not items:
+                continue
+
+            blocks.append(f"## {category_titles.get(category, category)}")
+            for item in items[:12]:
+                code = item.get("code", "-")
+                name = item.get("name", code)
+                price = item.get("price")
+                change_pct = item.get("change_pct")
+                price_text = "N/A" if price is None else f"{float(price):.2f}"
+                change_text = "N/A" if change_pct is None else f"{float(change_pct):+.2f}%"
+                blocks.append(f"- {name} ({code}): {price_text}, {change_text}")
+
+        return "\n".join(blocks) if blocks else "暂无AI产业链个股行情数据。"
 
     def _build_news_block(self, news: List) -> str:
         """Build a source-aware news catalyst table for the rendered report."""
@@ -1056,6 +1216,9 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         for idx in overview.indices:
             direction = "↑" if idx.change_pct > 0 else "↓" if idx.change_pct < 0 else "-"
             indices_text += f"- {idx.name}: {idx.current:.2f} ({direction}{abs(idx.change_pct):.2f}%)\n"
+
+        # AI产业链行情信息
+        ai_chain_text = self._format_ai_chain_prompt(overview) if self.region == "jp" else ""
         
         # 板块信息
         top_sectors_text = ", ".join([f"{s['name']}({s['change_pct']:+.2f}%)" for s in overview.top_sectors[:3]])
@@ -1147,6 +1310,9 @@ Lagging: {bottom_sectors_text if bottom_sectors_text else "N/A"}"""
 ## Major Indices
 {indices_placeholder}
 
+## AI Chain Quotes
+{ai_chain_text if ai_chain_text else "No AI chain quote data."}
+
 {stats_block}
 
 {sector_block}
@@ -1200,6 +1366,8 @@ Output the report content directly, no extra commentary.
 - emoji 仅在标题处少量使用（每个标题最多1个）
 - 报告要像机构研究员的盘后研究笔记：先给结论，再按市场状态、AI产业链、催化、风险展开
 - 不要重复列出已由系统注入的表格数据；正文负责解释表格背后的含义
+- 必须结合【主要指数】和【AI产业链行情】判断全球AI核心资产、日本半导体链、日元汇率与美国利率是否共振
+- 对日本半导体链要重点判断：设备、材料、硅片、测试、封装链条是同步走强、分化，还是风险上升
 
 ---
 
@@ -1210,6 +1378,9 @@ Output the report content directly, no extra commentary.
 
 ## 主要指数
 {indices_placeholder}
+
+## AI产业链行情
+{ai_chain_text if ai_chain_text else "暂无AI产业链行情数据。"}
 
 {stats_block}
 
@@ -1296,6 +1467,7 @@ Output the report content directly, no extra commentary.
 
         if self.region == "jp":
             indices_block = self._build_indices_block(overview)
+            ai_chain_block = self._build_ai_chain_block(overview)
             return f"""## {overview.date} AI产业链市场观察
 
 > 今日观察聚焦全球AI主线、日股半导体链与主要宏观风险。若行情源数据不足，本报告仅作为定性观察。
@@ -1307,6 +1479,8 @@ Output the report content directly, no extra commentary.
 
 ### 二、日本股市与半导体链
 - 重点方向：半导体设备、材料、硅片、PCB/ABF载板、精密零部件。
+- 当前产业链行情：
+{ai_chain_block or "AI产业链个股行情不足，暂以指数和新闻进行定性观察。"}
 - 当前判断：中性观察，等待全球AI主线、日元汇率与日股半导体链进一步共振。
 
 ### 三、关键催化
@@ -1453,6 +1627,8 @@ if __name__ == "__main__":
     print(f"指数数量: {len(overview.indices)}")
     for idx in overview.indices:
         print(f"  {idx.name}: {idx.current:.2f} ({idx.change_pct:+.2f}%)")
+    ai_chain_count = sum(len(items) for items in getattr(overview, "ai_chain", {}).values())
+    print(f"AI产业链行情数量: {ai_chain_count}")
     print(f"上涨: {overview.up_count} | 下跌: {overview.down_count}")
     print(f"成交额: {overview.total_amount:.0f}亿")
     
