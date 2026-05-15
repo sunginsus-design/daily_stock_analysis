@@ -80,7 +80,6 @@ jobs:
           # ==========================================
           # 投资研究日报配置（适合日股/美股 AI产业观察）
           # ==========================================
-          REPORT_LANGUAGE: 'zh-CN'
           REPORT_STYLE: 'investment_research'
           MARKET_REGION: 'JP_US_AI'
           ENABLE_MARKET_RECAP: 'true'
