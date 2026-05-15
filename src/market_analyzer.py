@@ -125,16 +125,28 @@ class MarketAnalyzer:
         self.analyzer = analyzer
         self.data_manager = DataFetcherManager()
 
+        # User-specific fork:
+        # The market recap in this project is intended to be a Japan / global AI
+        # supply-chain review.  Force JP mode unless the workflow explicitly opts
+        # out by setting MARKET_REGION=cn and REPORT_STYLE is not investment_research.
         requested_region = (region or "jp").strip().lower()
-        env_market_region = (os.getenv("MARKET_REGION", "") or str(getattr(self.config, "market_region", "") or "")).strip().lower()
-        env_report_style = (os.getenv("REPORT_STYLE", "") or str(getattr(self.config, "report_style", "") or "")).strip().lower()
+        env_market_region = (
+            os.getenv("MARKET_REGION", "")
+            or str(getattr(self.config, "market_region", "") or "")
+        ).strip().lower()
+        env_report_style = (
+            os.getenv("REPORT_STYLE", "")
+            or str(getattr(self.config, "report_style", "") or "")
+        ).strip().lower()
 
-        if requested_region == "cn" and (
-            "jp" in env_market_region
+        force_jp_ai = (
+            not env_market_region
+            or "jp" in env_market_region
             or "japan" in env_market_region
             or "ai" in env_market_region
             or "investment" in env_report_style
-        ):
+        )
+        if force_jp_ai:
             requested_region = "jp"
 
         self.region = requested_region if requested_region in ("cn", "us", "hk", "jp") else "jp"
@@ -167,7 +179,8 @@ class MarketAnalyzer:
 
 【重要限制】
 - 不要写 A股大盘复盘。
-- 禁止使用：上证指数、深证成指、创业板、涨停、跌停、两市成交额、北向资金、主力洗盘、打板等A股语境。
+- 标题必须使用“AI产业链市场观察”或“日本股市与AI半导体观察”，不得使用“大盘复盘”。
+- 禁止使用：上证指数、深证成指、创业板、科创50、上证50、沪深300、涨停、跌停、两市成交额、北向资金、主力洗盘、打板等A股语境。
 - 如果指数或成交额数据缺失，只能写“行情数据不足”，不能推断“流动性冻结”“市场静止”“成交额归零”。
 - 技术数据不足时，优先根据新闻与产业逻辑做定性观察。
 - 输出纯 Markdown，不要 JSON，不要代码块。
@@ -202,9 +215,9 @@ class MarketAnalyzer:
 - 观察NASDAQ、SOX、NVIDIA、TSMC、ASML等全球AI核心资产的风险偏好。
 - 若缺少数据，只能说明“数据不足”，不要编造具体涨跌。
 
-### 二、日本半导体链观察
-- 关注半导体设备、材料、硅片、电子零部件、PCB/ABF载板。
-- 说明日股AI产业链当前是趋势强化、中性观察，还是风险上升。
+### 二、日本股市与半导体链
+- 观察日经225、TOPIX、日本半导体设备、材料、硅片、电子零部件、PCB/ABF载板。
+- 判断日股AI产业链当前是趋势强化、中性观察，还是风险上升。
 
 ### 三、关键催化
 - NVIDIA业绩与AI资本开支
@@ -253,12 +266,12 @@ class MarketAnalyzer:
 
     def _get_review_title(self, date: str) -> str:
         if self._get_review_language() == "en":
-            market_names = {"us": "US Market Recap", "hk": "HK Market Recap", "jp": "Japan AI/Semiconductor Market Recap"}
+            market_names = {"us": "US Market Recap", "hk": "HK Market Recap", "jp": "AI Supply Chain / Japan Semiconductor Watch"}
             market_name = market_names.get(self.region, "A-share Market Recap")
             return f"## {date} {market_name}"
         if self.region == "jp":
-            return f"## {date} 日股AI产业链复盘"
-        return f"## {date} 大盘复盘"
+            return f"## {date} AI产业链市场观察"
+        return f"## {date} AI产业链市场观察"
 
     def _get_index_hint(self) -> str:
         if self._get_review_language() == "en":
@@ -430,7 +443,8 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         # 1. 获取主要指数行情（按 region 切换）
         overview.indices = self._get_main_indices()
 
-        # JP/AI mode: do not use A-share breadth / limit-up / sector ranking data.
+        # JP/AI mode: never use A-share market breadth, limit-up/down,
+        # A-share turnover, or A-share sector rankings.
         if self.region == "jp":
             return overview
 
@@ -482,9 +496,9 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
                     logger.warning("[AI复盘] 日股/全球指数行情缺失，将仅依赖新闻搜索进行定性分析")
 
             if not indices:
-                logger.warning("[大盘] 所有行情数据源失败，将依赖新闻搜索进行分析")
+                logger.warning("[AI复盘] 指数行情缺失，将依赖新闻搜索进行分析")
             else:
-                logger.info(f"[大盘] 获取到 {len(indices)} 个指数行情")
+                logger.info(f"[AI复盘] 获取到 {len(indices)} 个指数行情")
 
         except Exception as e:
             logger.error(f"[大盘] 获取指数行情失败: {e}")
@@ -493,7 +507,7 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
 
     @staticmethod
     def _filter_valid_indices(indices: List[MarketIndex]) -> List[MarketIndex]:
-        """Remove placeholder index rows with no usable price data."""
+        """Remove placeholder index rows with no usable market data."""
         valid: List[MarketIndex] = []
         for idx in indices:
             if not idx:
@@ -622,7 +636,7 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
             news: 市场新闻列表 (SearchResult 对象列表)
             
         Returns:
-            大盘复盘报告文本
+            大盘市场观察报告文本
         """
         if not self.analyzer or not self.analyzer.is_available():
             logger.warning("[大盘] AI分析器未配置或不可用，使用模板生成报告")
@@ -650,8 +664,7 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         news: Optional[List] = None,
     ) -> str:
         """Inject structured data tables into the corresponding LLM prose sections."""
-        # Build data blocks. JP/AI review intentionally avoids A-share-style
-        # breadth and sector ranking tables.
+        # Build data blocks. JP/AI review avoids A-share-style breadth and sector ranking tables.
         stats_block = "" if self.region == "jp" else self._build_stats_block(overview)
         indices_block = self._build_indices_block(overview)
         sector_block = "" if self.region == "jp" else self._build_sector_block(overview)
@@ -1213,7 +1226,7 @@ Output the report content directly, no extra commentary.
 
 # 输出格式模板（请严格按此格式输出）
 
-## {overview.date} 大盘复盘
+## {overview.date} AI产业链市场观察
 
 > 一句话给出今日市场状态、核心矛盾和明日优先观察方向。
 
@@ -1285,14 +1298,14 @@ Output the report content directly, no extra commentary.
             indices_block = self._build_indices_block(overview)
             return f"""## {overview.date} AI产业链市场观察
 
-> 今日复盘聚焦全球AI主线、日股半导体链与主要宏观风险。若行情源数据不足，本报告仅作为定性观察。
+> 今日观察聚焦全球AI主线、日股半导体链与主要宏观风险。若行情源数据不足，本报告仅作为定性观察。
 
 ### 一、全球AI风险偏好
 - 重点观察：NASDAQ、SOX、NVIDIA、TSMC、ASML、云厂商资本开支。
 - 当前行情数据：
 {indices_block or "行情数据不足，暂不做指数层面的强判断。"}
 
-### 二、日本半导体链观察
+### 二、日本股市与半导体链
 - 重点方向：半导体设备、材料、硅片、PCB/ABF载板、精密零部件。
 - 当前判断：中性观察，等待全球AI主线、日元汇率与日股半导体链进一步共振。
 
@@ -1339,7 +1352,7 @@ Output the report content directly, no extra commentary.
 - **Leaders**: {top_text or "N/A"}
 - **Laggards**: {bottom_text or "N/A"}
 """
-            market_names = {"us": "US Market Recap", "hk": "HK Market Recap", "jp": "Japan AI/Semiconductor Market Recap"}
+            market_names = {"us": "US Market Recap", "hk": "HK Market Recap", "jp": "AI Supply Chain / Japan Semiconductor Watch"}
             market_name = market_names.get(self.region, "A-share Market Recap")
             report = f"""## {overview.date} {market_name}
 
@@ -1365,7 +1378,7 @@ Market conditions can change quickly. The data above is for reference only and d
         dashboard_block = self._build_stats_block(overview)
         indices_block = self._build_indices_block(overview)
         sector_block = self._build_sector_block(overview)
-        return f"""## {overview.date} 大盘复盘
+        return f"""## {overview.date} AI产业链市场观察
 
 > 今日{market_label}市场整体呈现**{market_mood}**态势，优先观察指数承接、成交额变化和板块持续性。
 
@@ -1400,12 +1413,12 @@ Market conditions can change quickly. The data above is for reference only and d
     
     def run_daily_review(self) -> str:
         """
-        执行每日大盘复盘流程
+        执行每日AI产业链市场观察流程
         
         Returns:
-            复盘报告文本
+            市场观察报告文本
         """
-        logger.info("========== 开始大盘复盘分析 ==========")
+        logger.info("========== 开始AI产业链市场观察 ==========")
         
         # 1. 获取市场概览
         overview = self.get_market_overview()
@@ -1416,7 +1429,7 @@ Market conditions can change quickly. The data above is for reference only and d
         # 3. 生成复盘报告
         report = self.generate_market_review(overview, news)
         
-        logger.info("========== 大盘复盘分析完成 ==========")
+        logger.info("========== AI产业链市场观察完成 ==========")
         
         return report
 
